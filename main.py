@@ -232,7 +232,7 @@ def main():
     max_files = int(os.environ.get("MAX_FILES", "50"))
     crawler = WebCrawler(data_dir="data", max_files=max_files)
     
-    start_urls_env = os.environ.get("START_URLS", "https://tr.wikipedia.org/wiki/Recep_Tayyip_Erdo%C4%9Fan")
+    start_urls_env = os.environ.get("START_URLS", "https://tr.wikipedia.org/wiki/Python")
     start_urls = [url.strip() for url in start_urls_env.split(",") if url.strip()]
     
     print(f"Starting web crawling with max {crawler.max_files} files")
