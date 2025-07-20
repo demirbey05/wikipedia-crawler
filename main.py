@@ -5,6 +5,7 @@ import json
 from typing import Optional, List, Dict, Tuple, Set
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+from tqdm import tqdm
 
 
 def fetch_html(url: str, timeout: int = 30) -> Optional[str]:
@@ -154,7 +155,6 @@ class WebCrawler:
         if not self.should_crawl(url):
             return False
         
-        print(f"Crawling: {url}")
         html = fetch_html(url)
         if not html:
             return False
@@ -177,15 +177,19 @@ class WebCrawler:
                 self.pending_urls.append(normalized_link)
         
         self.save_visited_urls()
-        print(f"Saved: {filename}")
         return True
     
     def crawl_all(self, start_urls: List[str]) -> None:
         self.pending_urls.extend(start_urls)
         
-        while self.pending_urls and self.file_count < self.max_files:
-            url = self.pending_urls.pop(0)
-            self.crawl_url(url)
+        with tqdm(total=self.max_files, desc="Crawling pages", unit="pages") as pbar:
+            pbar.update(self.file_count)
+            
+            while self.pending_urls and self.file_count < self.max_files:
+                url = self.pending_urls.pop(0)
+                if self.crawl_url(url):
+                    pbar.update(1)
+                    pbar.set_postfix_str(f"Queue: {len(self.pending_urls)}")
         
         print(f"\nCrawling completed. Files created: {self.file_count}")
         if self.file_count >= self.max_files:
@@ -228,11 +232,11 @@ def main():
     max_files = int(os.environ.get("MAX_FILES", "50"))
     crawler = WebCrawler(data_dir="data", max_files=max_files)
     
-    start_urls = [
-        "https://tr.wikipedia.org/wiki/Recep_Tayyip_Erdo%C4%9Fan"
-    ]
+    start_urls_env = os.environ.get("START_URLS", "https://tr.wikipedia.org/wiki/Recep_Tayyip_Erdo%C4%9Fan")
+    start_urls = [url.strip() for url in start_urls_env.split(",") if url.strip()]
     
     print(f"Starting web crawling with max {crawler.max_files} files")
+    print(f"Start URLs: {start_urls}")
     print(f"Already visited {len(crawler.visited_urls)} URLs")
     print(f"Current file count: {crawler.file_count}")
     
