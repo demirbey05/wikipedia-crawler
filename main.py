@@ -1,7 +1,10 @@
 import urllib.request
 import urllib.error
-from typing import Optional, List, Dict, Tuple
+import os
+import json
+from typing import Optional, List, Dict, Tuple, Set
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
 
 
 def fetch_html(url: str, timeout: int = 30) -> Optional[str]:
@@ -84,6 +87,111 @@ def parse_article_content(html: str) -> Tuple[List[Dict], List[str]]:
     return content_elements, links
 
 
+class WebCrawler:
+    def __init__(self, data_dir: str = "data", max_files: int = 50):
+        self.data_dir = data_dir
+        self.max_files = max_files
+        self.visited_urls: Set[str] = set()
+        self.file_count = 0
+        self.pending_urls: List[str] = []
+        
+        os.makedirs(data_dir, exist_ok=True)
+        self.load_visited_urls()
+    
+    def load_visited_urls(self) -> None:
+        visited_file = os.path.join(self.data_dir, "visited_urls.json")
+        if os.path.exists(visited_file):
+            try:
+                with open(visited_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.visited_urls = set(data.get('visited', []))
+                    self.file_count = data.get('file_count', 0)
+            except Exception as e:
+                print(f"Error loading visited URLs: {e}")
+    
+    def save_visited_urls(self) -> None:
+        visited_file = os.path.join(self.data_dir, "visited_urls.json")
+        try:
+            with open(visited_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'visited': list(self.visited_urls),
+                    'file_count': self.file_count
+                }, f, indent=2)
+        except Exception as e:
+            print(f"Error saving visited URLs: {e}")
+    
+    def normalize_url(self, url: str, base_url: str = "") -> Optional[str]:
+        if not url:
+            return None
+        
+        if url.startswith('#'):
+            return None
+        
+        if url.startswith('/'):
+            if base_url:
+                parsed_base = urlparse(base_url)
+                return f"{parsed_base.scheme}://{parsed_base.netloc}{url}"
+        
+        if url.startswith('http'):
+            return url
+        
+        return None
+    
+    def should_crawl(self, url: str) -> bool:
+        if url in self.visited_urls:
+            return False
+        
+        if self.file_count >= self.max_files:
+            return False
+        
+        parsed = urlparse(url)
+        if parsed.netloc and 'wikipedia.org' in parsed.netloc:
+            return True
+        
+        return False
+    
+    def crawl_url(self, url: str) -> bool:
+        if not self.should_crawl(url):
+            return False
+        
+        print(f"Crawling: {url}")
+        html = fetch_html(url)
+        if not html:
+            return False
+        
+        title = get_page_title(html)
+        if not title:
+            title = f"page_{self.file_count + 1}"
+        
+        content_elements, links = parse_article_content(html)
+        
+        self.file_count += 1
+        filename = os.path.join(self.data_dir, f"{self.file_count:03d}_{title.replace(' ', '_').replace('/', '_')}.txt")
+        write_content_to_file(title, content_elements, links, filename)
+        
+        self.visited_urls.add(url)
+        
+        for link in links:
+            normalized_link = self.normalize_url(link, url)
+            if normalized_link and normalized_link not in self.visited_urls:
+                self.pending_urls.append(normalized_link)
+        
+        self.save_visited_urls()
+        print(f"Saved: {filename}")
+        return True
+    
+    def crawl_all(self, start_urls: List[str]) -> None:
+        self.pending_urls.extend(start_urls)
+        
+        while self.pending_urls and self.file_count < self.max_files:
+            url = self.pending_urls.pop(0)
+            self.crawl_url(url)
+        
+        print(f"\nCrawling completed. Files created: {self.file_count}")
+        if self.file_count >= self.max_files:
+            print(f"Reached maximum file limit of {self.max_files}")
+
+
 def write_content_to_file(title: str, content_elements: List[Dict], links: List[str], filename: str) -> None:
     # Filter out headings that have no paragraphs after them
     filtered_elements = []
@@ -117,36 +225,18 @@ def write_content_to_file(title: str, content_elements: List[Dict], links: List[
 
 
 def main():
-    url = "https://tr.wikipedia.org/wiki/Recep_Tayyip_Erdo%C4%9Fan"
-    html = fetch_html(url)
-    if html:
-        title = get_page_title(html)
-        if title:
-            print(f"Page title: {title}")
-        else:
-            print("Title not found")
-        
-        content_elements, links = parse_article_content(html)
-        print(f"\nFound {len(content_elements)} content elements and {len(links)} links")
-        
-        # Write to file
-        filename = f"{title.replace(' ', '_')}.txt"
-        write_content_to_file(title, content_elements, links, filename)
-        print(f"\nContent written to: {filename}")
-        
-        # Show first 3 content elements
-        for element in content_elements[:3]:
-            if element['type'] == 'heading':
-                print(f"\nH{element['level']}: {element['text']}")
-            else:
-                print(f"\nParagraph: {element['text'][:100]}...")
-        
-        # Show first 5 links
-        print(f"\nFirst 5 links:")
-        for link in links[:5]:
-            print(f"- {link}")
-    else:
-        print("Failed to fetch HTML content")
+    max_files = int(os.environ.get("MAX_FILES", "50"))
+    crawler = WebCrawler(data_dir="data", max_files=max_files)
+    
+    start_urls = [
+        "https://tr.wikipedia.org/wiki/Recep_Tayyip_Erdo%C4%9Fan"
+    ]
+    
+    print(f"Starting web crawling with max {crawler.max_files} files")
+    print(f"Already visited {len(crawler.visited_urls)} URLs")
+    print(f"Current file count: {crawler.file_count}")
+    
+    crawler.crawl_all(start_urls)
 
 
 if __name__ == "__main__":
